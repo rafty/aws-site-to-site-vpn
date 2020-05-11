@@ -1,0 +1,156 @@
+---
+Parameters:
+
+  ProjectName:
+    Type: String
+    Default: vpn
+
+  SubSystemName:
+    Type: String
+    Default: vpc
+
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+    Default: test
+
+  VPCSystemName:
+    Description: VPC Role Name
+    Type: String
+    Default: vpc
+
+  # Other party's VPN GW - Global IP address
+  CustomerGatewayIpAddress:
+    Type: String
+    Default: 169.61.246.235
+
+  # Required for static routing
+  # Subnet CIDR of the other party
+  CustomerTunnelInsideCidr:
+    Type: String
+    Default: 10.240.0.0/27
+
+  # Decide which to choose when connecting multiple VPNs
+  VPNTunnelCIDRs:
+    Description: Specify the Tunnel InsideCIDRs.
+    Type: CommaDelimitedList
+    Default: "169.254.8.0/30, 169.254.9.0/30"
+
+  # prior share key between the virtual private gateway and customer gateway
+  PreSharedKeyForVPNAttachment:
+    Type: String
+    Default: xxxxxxxxxxxxxxxxxxxx
+
+  CustomerGatewayBgpAsn:
+    Type: Number
+    Default: 65000
+
+  # Use the one issued automatically
+  # AmazonSideAsn:
+  #   Type: Number
+  #   Default: 64512
+  # Use default Amazon ASN
+
+Resources:
+
+  #################################################
+  # AWS ManagedVPN
+  #################################################
+  VPNGateway:
+    Type: AWS::EC2::VPNGateway
+    Properties:
+      Type: ipsec.1
+      # Use default Amazon ASN
+      # AmazonSideAsn: !Ref AmazonSideAsn
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-vgw
+
+  AttachVPNGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Fn::ImportValue: !Sub ${ProjectName}-${VPCSystemName}-${EnvironmentName}-VPC
+      VpnGatewayId: !Ref VPNGateway
+
+  CustomerGateway:
+    Type: AWS::EC2::CustomerGateway
+    Properties:
+      Type: ipsec.1
+      BgpAsn: !Ref CustomerGatewayBgpAsn
+      IpAddress: !Ref CustomerGatewayIpAddress
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-cgw
+
+  VPNConnection:
+    Type: AWS::EC2::VPNConnection
+    Properties:
+      Type: ipsec.1
+      CustomerGatewayId: !Ref CustomerGateway
+      VpnGatewayId: !Ref VPNGateway
+      # If you choose static routing, specify the Static IP Prefixes
+      # for the appropriate private networks in your office LAN,
+      # but not for dynamic routing.
+      StaticRoutesOnly: true
+      VpnTunnelOptionsSpecifications:
+        - PreSharedKey: !Ref PreSharedKeyForVPNAttachment
+          TunnelInsideCidr: !Select [0, !Ref VPNTunnelCIDRs]
+        - PreSharedKey: !Ref PreSharedKeyForVPNAttachment
+          TunnelInsideCidr: !Select [1, !Ref VPNTunnelCIDRs]
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-vpn-connection
+
+  # Required for static routing
+  VPNConnectionRoute:
+    Type: AWS::EC2::VPNConnectionRoute
+    Properties:
+      DestinationCidrBlock: !Ref CustomerTunnelInsideCidr
+      VpnConnectionId: !Ref VPNConnection
+
+  VPNRoutePropagation:
+    Type: AWS::EC2::VPNGatewayRoutePropagation
+    DependsOn: AttachVPNGateway
+    Properties:
+      RouteTableIds:
+        - Fn::ImportValue: !Sub ${ProjectName}-${VPCSystemName}-${EnvironmentName}-private-subnet-route-table1
+        - Fn::ImportValue: !Sub ${ProjectName}-${VPCSystemName}-${EnvironmentName}-private-subnet-route-table2
+      VpnGatewayId: !Ref VPNGateway
+
+  # Route packets to the other party's Subnet CIDR
+  PrivateRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: AttachVPNGateway
+    Properties:
+      RouteTableId:
+        Fn::ImportValue: !Sub ${ProjectName}-${VPCSystemName}-${EnvironmentName}-private-subnet-route-table1
+      DestinationCidrBlock: !Ref CustomerTunnelInsideCidr
+      GatewayId: !Ref VPNGateway
+
+  # Route packets to the other party's Subnet CIDR
+  PrivateRoute2:
+    Type: AWS::EC2::Route
+    DependsOn: AttachVPNGateway
+    Properties:
+      RouteTableId:
+        Fn::ImportValue: !Sub ${ProjectName}-${VPCSystemName}-${EnvironmentName}-private-subnet-route-table2
+      DestinationCidrBlock: !Ref CustomerTunnelInsideCidr
+      GatewayId: !Ref VPNGateway
+
+Outputs:
+  CustomerGateway:
+    Description: A reference to the created customer gateway
+    Value: !Ref CustomerGateway
+    Export:
+      Name: !Sub ${ProjectName}-${VPCSystemName}-${EnvironmentName}-customer-gateway
+  VPNGateway:
+    Description: A reference to the created vpn gateway (virtual private gateway)
+    Value: !Ref VPNGateway
+    Export:
+      Name: !Sub ${ProjectName}-${VPCSystemName}-${EnvironmentName}-vpn-gateway
+  VPNConnection:
+    Description: A reference to the created vpn connection 
+    Value: !Ref VPNConnection
+    Export:
+      Name: !Sub ${ProjectName}-${VPCSystemName}-${EnvironmentName}-vpn-gateway-connection
