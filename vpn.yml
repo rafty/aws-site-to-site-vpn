@@ -22,13 +22,13 @@ Parameters:
   # Other party's VPN GW - Global IP address
   CustomerGatewayIpAddress:
     Type: String
-    Default: 169.61.246.235
+    Default: xxx.xx.xxx.xxx
 
   # Required for static routing
   # Subnet CIDR of the other party
   CustomerTunnelInsideCidr:
     Type: String
-    Default: 10.240.0.0/27
+    Default: xxx.xxx.xxx.xxx/27
 
   # Decide which to choose when connecting multiple VPNs
   VPNTunnelCIDRs:
